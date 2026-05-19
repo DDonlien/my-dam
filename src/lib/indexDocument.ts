@@ -27,6 +27,12 @@ export type IndexSyncResult = {
   status: 'created' | 'updated' | 'loaded' | 'empty'
   reason: string
   indexLastModified?: number
+  writeError?: string
+  writeSkipped?: boolean
+}
+
+type SyncIndexOptions = {
+  persist?: boolean
 }
 
 export async function syncIndexDocument(
@@ -34,7 +40,9 @@ export async function syncIndexDocument(
   rootName: string,
   manifests: ManifestSource[],
   fileIndex: FileIndex,
+  options: SyncIndexOptions = {},
 ): Promise<IndexSyncResult> {
+  const { persist = true } = options
   const latestManifest = getLatestManifest(manifests)
   const currentSources = createManifestSnapshots(
     latestManifest ? [latestManifest] : [],
@@ -79,15 +87,24 @@ export async function syncIndexDocument(
 
   const assets = await parseAllManifests([latestManifest], fileIndex)
   const nextDoc = createIndexDoc(rootName, currentSources, assets)
+  if (!persist) {
+    return {
+      doc: nextDoc,
+      status: existing ? 'updated' : 'created',
+      reason: staleReason || invalidReason || 'index created',
+      writeSkipped: true,
+    }
+  }
+
   try {
     await writeJsonFile(root, INDEX_FILENAME, nextDoc)
   } catch (error) {
-    throw new Error(
-      `生成 ${INDEX_FILENAME} 失败：${
-        error instanceof Error ? error.message : '未知错误'
-      }`,
-      { cause: error },
-    )
+    return {
+      doc: nextDoc,
+      status: existing ? 'updated' : 'created',
+      reason: staleReason || invalidReason || 'index created',
+      writeError: error instanceof Error ? error.message : '未知错误',
+    }
   }
 
   return {

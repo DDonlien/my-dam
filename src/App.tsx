@@ -1,20 +1,25 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
+  Box,
   ChevronDown,
   ChevronUp,
   ChevronsLeft,
   ChevronsRight,
+  CircleHelp,
   Download,
   Eye,
+  FileAudio,
+  FileText,
+  FileVideo,
   FolderOpen,
   Image as ImageIcon,
   Lock,
   MousePointerClick,
+  Plus,
   RefreshCw,
   Search,
   Star,
-  Tags,
   Trash2,
   Type,
   Unlock,
@@ -106,6 +111,14 @@ const ASSET_KIND_FILTERS = KIND_FILTERS.filter(
 const RATING_FILTERS = [5, 4, 3, 2, 1]
 
 const INDEX_SOURCE_ID = '__asset-browser-index__'
+const KIND_ICON_COMPONENTS: Record<AssetKind, typeof ImageIcon> = {
+  image: ImageIcon,
+  audio: FileAudio,
+  video: FileVideo,
+  model: Box,
+  document: FileText,
+  unknown: CircleHelp,
+}
 
 function App() {
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(
@@ -133,6 +146,7 @@ function App() {
   const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([])
   const [selectedCollectionFilters, setSelectedCollectionFilters] = useState<string[]>([])
   const [selectedRatingFilters, setSelectedRatingFilters] = useState<number[]>([])
+  const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({})
   const [stateDoc, setStateDoc] = useState<AppStateDoc>(() => loadLocalState())
   const [metadataReady, setMetadataReady] = useState(false)
   const [busy, setBusy] = useState('')
@@ -259,9 +273,18 @@ function App() {
 
     let cancelled = false
     const timer = window.setTimeout(() => {
-      void writeJsonFile(rootHandle, STATE_FILENAME, nextMetadata)
-        .then(() => {
-          lastMetadataSaveRef.current = serialized
+      void (async () => {
+        if (rootHandle.queryPermission) {
+          const writePermission = await rootHandle.queryPermission({
+            mode: 'readwrite',
+          })
+          if (writePermission !== 'granted') return false
+        }
+        await writeJsonFile(rootHandle, STATE_FILENAME, nextMetadata)
+        return true
+      })()
+        .then((saved) => {
+          if (saved) lastMetadataSaveRef.current = serialized
         })
         .catch((error: unknown) => {
           if (cancelled) return
@@ -307,9 +330,18 @@ function App() {
   }
 
   const chooseRoot = async () => {
+    let root: FileSystemDirectoryHandle
     try {
+      setBusy('Opening folder')
+      root = await pickDirectory('read')
       setBusy('Indexing folder')
-      const root = await pickDirectory('readwrite')
+    } catch (error) {
+      handlePickerError(error, '选择目录失败。')
+      setBusy('')
+      return
+    }
+
+    try {
       setMetadataReady(false)
       lastMetadataSaveRef.current = ''
       const [nextManifests, nextIndex] = await Promise.all([
@@ -337,10 +369,17 @@ function App() {
         )
       }
 
-      await loadIndexForRoot(root, nextManifests, nextIndex, root.name)
+      await loadIndexForRoot(root, nextManifests, nextIndex, root.name, {
+        persistIndex: false,
+      })
       setMetadataReady(true)
     } catch (error) {
-      handlePickerError(error, '选择目录失败。')
+      log(
+        'fail',
+        error instanceof Error
+          ? `目录已选择，但读取失败：${error.message}`
+          : '目录已选择，但读取失败。',
+      )
     } finally {
       setBusy('')
     }
@@ -412,9 +451,12 @@ function App() {
     nextManifests: ManifestSource[],
     index: FileIndex,
     sourceRootName: string,
+    options: { persistIndex?: boolean } = {},
   ) => {
     setBusy(`Checking ${INDEX_FILENAME}`)
-    const result = await syncIndexDocument(root, sourceRootName, nextManifests, index)
+    const result = await syncIndexDocument(root, sourceRootName, nextManifests, index, {
+      persist: options.persistIndex ?? true,
+    })
     const hydrated = await Promise.all(
       hydrateIndexAssets(result.doc, index).map(hydrateAsset),
     )
@@ -430,7 +472,10 @@ function App() {
         activeManifestName: INDEX_FILENAME,
       }),
     )
-    logIndexResult(result.status, result.reason, hydrated.length, true)
+    logIndexResult(result.status, result.reason, hydrated.length, true, {
+      writeError: result.writeError,
+      writeSkipped: result.writeSkipped,
+    })
     setBusy('')
   }
 
@@ -439,6 +484,7 @@ function App() {
     reason: string,
     assetCount: number,
     loadingIndex = false,
+    writeState: { writeError?: string; writeSkipped?: boolean } = {},
   ) => {
     if (status === 'empty') {
       log('warn', '根目录没有找到 asset-browser-index JSON/CSV/XLSX。')
@@ -450,6 +496,15 @@ function App() {
         loadingIndex
           ? `索引已是最新，直接读取 ${INDEX_FILENAME}。`
           : `${INDEX_FILENAME} 已是最新，未修改。`,
+      )
+      return
+    }
+    if (loadingIndex && (writeState.writeSkipped || writeState.writeError)) {
+      log(
+        'warn',
+        writeState.writeSkipped
+          ? `${INDEX_FILENAME} 已在内存中读取，未请求写入磁盘权限。`
+          : `${INDEX_FILENAME} 已在内存中读取，但写入磁盘失败：${writeState.writeError}`,
       )
       return
     }
@@ -659,18 +714,26 @@ function App() {
     })
   }
 
-  const editAssetTags = (asset: AssetRecord) => {
+  const addAssetTag = (asset: AssetRecord, value: string) => {
+    const nextTag = value.trim()
+    if (!nextTag) return
     const currentTags = stateDoc.assetTags[asset.id] ?? []
-    const nextValue = window.prompt('标签，用逗号或分号分隔', currentTags.join(', '))
-    if (nextValue === null) return
-    const nextTags = splitUserTags(nextValue)
+    if ([...asset.tags, ...currentTags].includes(nextTag)) {
+      setTagDrafts((current) => ({ ...current, [asset.id]: '' }))
+      return
+    }
+    const nextTags = [...currentTags, nextTag]
     setStateDoc((current) => setAssetTags(current, asset, nextTags))
-    log(
-      'success',
-      nextTags.length > 0
-        ? `更新标签：${asset.name} -> ${nextTags.join(', ')}`
-        : `清空标签：${asset.name}`,
-    )
+    setTagDrafts((current) => ({ ...current, [asset.id]: '' }))
+    log('success', `新增标签：${asset.name} -> ${nextTag}`)
+  }
+
+  const removeAssetTag = (asset: AssetRecord, tag: string) => {
+    const currentTags = stateDoc.assetTags[asset.id] ?? []
+    if (!currentTags.includes(tag)) return
+    const nextTags = currentTags.filter((item) => item !== tag)
+    setStateDoc((current) => setAssetTags(current, asset, nextTags))
+    log('success', `移除标签：${asset.name} -> ${tag}`)
   }
 
   const loadMetadataManually = async () => {
@@ -869,6 +932,7 @@ function App() {
               <FilterGroupControl
                 title="Type"
                 count={selectedKindFilters.length}
+                selectedLabels={selectedKindFilters.map(getKindLabel)}
                 expanded={expandedFilterGroups.includes('type')}
                 onOpenChange={(open) => setFilterGroupOpen('type', open)}
               >
@@ -890,6 +954,7 @@ function App() {
               <FilterGroupControl
                 title="Tag"
                 count={selectedTagFilters.length}
+                selectedLabels={selectedTagFilters}
                 expanded={expandedFilterGroups.includes('tag')}
                 onOpenChange={(open) => setFilterGroupOpen('tag', open)}
               >
@@ -915,6 +980,11 @@ function App() {
               <FilterGroupControl
                 title="Collection"
                 count={selectedCollectionFilters.length}
+                selectedLabels={selectedCollectionFilters.map(
+                  (id) =>
+                    stateDoc.favorites.find((collection) => collection.id === id)
+                      ?.name ?? id,
+                )}
                 expanded={expandedFilterGroups.includes('collection')}
                 onOpenChange={(open) => setFilterGroupOpen('collection', open)}
               >
@@ -936,6 +1006,7 @@ function App() {
               <FilterGroupControl
                 title="Rating"
                 count={selectedRatingFilters.length}
+                selectedLabels={selectedRatingFilters.map((rating) => `${rating} 分`)}
                 expanded={expandedFilterGroups.includes('rating')}
                 onOpenChange={(open) => setFilterGroupOpen('rating', open)}
               >
@@ -960,7 +1031,7 @@ function App() {
         <div className={workspaceClassName}>
           <section className="asset-list" aria-label="Assets">
             <div className="asset-list-head">
-              <span>
+              <span className="asset-select-head">
                 <Checkbox
                   className="select-checkbox"
                   checked={
@@ -975,21 +1046,28 @@ function App() {
                   onCheckedChange={toggleFilteredSelection}
                 />
               </span>
-              <span>Type</span>
-              <span>Name</span>
-              <span>Rating</span>
-              <span>Path</span>
-              <span>Status</span>
-              <span>Actions</span>
+              <span className="asset-name-head">Name</span>
+              <span className="asset-middle-head">
+                <span>Type</span>
+                <span>Rating</span>
+                <span>Path</span>
+                <span>Status</span>
+              </span>
+              <span className="asset-tag-head">Tag</span>
+              <span className="asset-actions-head">Actions</span>
             </div>
             <ScrollArea className="asset-rows">
               <AnimatePresence initial={false}>
               {filteredAssets.map((asset) => (
                 (() => {
-                  const displayTags = [
+                  const displayTags = Array.from(new Set([
                     ...asset.tags,
                     ...(stateDoc.assetTags[asset.id] ?? []),
-                  ]
+                  ]))
+                  const visibleTagLimit = displayTags.length > 2 ? 2 : 3
+                  const visibleTags = displayTags.slice(0, visibleTagLimit)
+                  const hiddenTagCount = Math.max(displayTags.length - visibleTags.length, 0)
+                  const primaryCollection = stateDoc.favorites[0]
                   return (
                 <motion.div
                   key={asset.id}
@@ -1041,33 +1119,70 @@ function App() {
                     }}
                     aria-label={`Select ${asset.name}`}
                   />
-                  <Badge className={cn('kind-dot', `is-${asset.kind}`)} variant="secondary">
-                    {asset.kind === 'image' ? <ImageIcon data-icon="inline-start" /> : null}
-                    {getKindLabel(asset.kind)}
-                  </Badge>
                   <span className="asset-name">
                     <strong>{asset.name}</strong>
                     {asset.kind === 'audio' ? (
-                    <InlineAudioPlayer
+                      <InlineAudioPlayer
                         asset={asset}
                         active={activeAudioId === asset.id}
                         playSignal={activeAudioId === asset.id ? audioPlaySignal : 0}
                         previewMode={previewMode}
                         onActivate={() => requestAudioPlayback(asset.id)}
                         onInteract={() => setPreviewAssetId('')}
-                    />
-                  ) : (
-                      displayTags.length > 0 && <em>{displayTags.join(' / ')}</em>
-                    )}
+                      />
+                    ) : null}
                   </span>
-                  <RatingControl
-                    rating={stateDoc.assetRatings[asset.id] ?? 0}
-                    onRate={(rating) => updateAssetRating(asset, rating)}
-                  />
-                  <span className="asset-path">{asset.normalizedPath || asset.reference}</span>
-                  <Badge className={cn('status-pill', `is-${asset.status}`)} variant="outline">
-                    {asset.status}
-                  </Badge>
+                  <span className="asset-middle">
+                    <KindIconBadge kind={asset.kind} />
+                    <RatingControl
+                      rating={stateDoc.assetRatings[asset.id] ?? 0}
+                      onRate={(rating) => updateAssetRating(asset, rating)}
+                    />
+                    <span className="asset-path">{asset.normalizedPath || asset.reference}</span>
+                    <Badge className={cn('status-pill', `is-${asset.status}`)} variant="outline">
+                      {asset.status}
+                    </Badge>
+                  </span>
+                  <span className="row-tags" onClick={(event) => event.stopPropagation()}>
+                    {visibleTags.map((tag) => {
+                      const removable = stateDoc.assetTags[asset.id]?.includes(tag)
+                      return (
+                        <button
+                          key={tag}
+                          className={cn('tag-pill', removable && 'is-removable')}
+                          type="button"
+                          title={removable ? `移除 ${tag}` : tag}
+                          onClick={() => removable && removeAssetTag(asset, tag)}
+                        >
+                          {tag}
+                        </button>
+                      )
+                    })}
+                    {hiddenTagCount > 0 && (
+                      <span className="tag-pill is-overflow">+{hiddenTagCount}</span>
+                    )}
+                    <label className="tag-add-pill">
+                      <Plus />
+                      <input
+                        value={tagDrafts[asset.id] ?? ''}
+                        list="asset-tag-options"
+                        placeholder="Tag"
+                        aria-label={`Add tag to ${asset.name}`}
+                        onChange={(event) =>
+                          setTagDrafts((current) => ({
+                            ...current,
+                            [asset.id]: event.target.value,
+                          }))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter') return
+                          event.preventDefault()
+                          addAssetTag(asset, event.currentTarget.value)
+                        }}
+                        onBlur={(event) => addAssetTag(asset, event.currentTarget.value)}
+                      />
+                    </label>
+                  </span>
                   <span className="row-actions" onClick={(event) => event.stopPropagation()}>
                     <ToolbarIconButton
                       label="重命名"
@@ -1082,24 +1197,16 @@ function App() {
                     >
                       <Download />
                     </ToolbarIconButton>
-                    {stateDoc.favorites.map((collection) => (
+                    {primaryCollection && (
                       <ToolbarIconButton
-                        key={collection.id}
-                        label={`收藏到${collection.name}`}
-                        active={isAssetInCollection(asset.id, collection.id)}
+                        label={`收藏到${primaryCollection.name}`}
+                        active={isAssetInCollection(asset.id, primaryCollection.id)}
                         className="favorite-action"
-                        onClick={() => toggleFavoriteCollection(asset, collection.id)}
+                        onClick={() => toggleFavoriteCollection(asset, primaryCollection.id)}
                       >
                         <Star />
                       </ToolbarIconButton>
-                    ))}
-                    <ToolbarIconButton
-                      label="编辑标签"
-                      active={Boolean(stateDoc.assetTags[asset.id]?.length)}
-                      onClick={() => editAssetTags(asset)}
-                    >
-                      <Tags />
-                    </ToolbarIconButton>
+                    )}
                     <ToolbarIconButton
                       label="删除"
                       danger
@@ -1114,6 +1221,11 @@ function App() {
                 })()
               ))}
               </AnimatePresence>
+              <datalist id="asset-tag-options">
+                {tagOptions.map((tag) => (
+                  <option key={tag} value={tag} />
+                ))}
+              </datalist>
               {filteredAssets.length === 0 && (
                 <div className="empty-list">No assets</div>
               )}
@@ -1173,26 +1285,57 @@ function App() {
   )
 }
 
+function KindIconBadge({ kind }: { kind: AssetKind }) {
+  const Icon = KIND_ICON_COMPONENTS[kind]
+
+  return (
+    <Badge
+      className={cn('kind-dot', `is-${kind}`)}
+      variant="secondary"
+      title={getKindLabel(kind)}
+      aria-label={getKindLabel(kind)}
+    >
+      <Icon />
+    </Badge>
+  )
+}
+
 function FilterGroupControl({
   title,
   count,
+  selectedLabels,
   expanded,
   onOpenChange,
   children,
 }: {
   title: string
   count: number
+  selectedLabels?: string[]
   expanded: boolean
   onOpenChange: (open: boolean) => void
   children: ReactNode
 }) {
+  const visibleLabels = (selectedLabels ?? []).slice(0, 2)
+  const overflowCount = Math.max(count - visibleLabels.length, 0)
+
   return (
     <Popover open={expanded} onOpenChange={onOpenChange}>
       <section className={cn('filter-group', expanded && 'is-expanded')}>
         <PopoverTrigger asChild>
           <Button className="filter-group-trigger" variant="outline" type="button">
-            <span>{title}</span>
-            {count > 0 && <Badge variant="secondary">{count}</Badge>}
+            <span className="filter-title">{title}</span>
+            {visibleLabels.length > 0 && (
+              <span className="filter-selected">
+                {visibleLabels.map((label) => (
+                  <Badge key={label} variant="secondary">
+                    {label}
+                  </Badge>
+                ))}
+                {overflowCount > 0 && (
+                  <Badge variant="secondary">+{overflowCount}</Badge>
+                )}
+              </span>
+            )}
             {expanded ? <ChevronUp /> : <ChevronDown />}
           </Button>
         </PopoverTrigger>
@@ -1291,13 +1434,6 @@ function isUserAbort(error: unknown) {
     error instanceof DOMException &&
     (error.name === 'AbortError' || error.message.includes('aborted'))
   )
-}
-
-function splitUserTags(value: string) {
-  return value
-    .split(/[;,，、|]/)
-    .map((tag) => tag.trim())
-    .filter(Boolean)
 }
 
 function toggleArrayValue<T>(items: T[], value: T) {

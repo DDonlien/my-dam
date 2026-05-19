@@ -225,9 +225,28 @@
   }
 
   .filter-group-trigger {
-    @apply h-8 w-full justify-between rounded-md px-2.5 text-xs font-medium;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    @apply h-8 w-full items-center gap-2 rounded-md px-2.5 text-xs font-medium;
   }
 
+  .filter-title {
+    @apply justify-self-start text-left;
+  }
+
+  .filter-selected {
+    @apply flex min-w-0 items-center gap-1 overflow-hidden;
+  }
+
+  .filter-selected [data-slot="badge"] {
+    @apply h-5 max-w-20 shrink-0 truncate rounded-full px-2 text-[10px];
+  }
+
+  .filter-group-trigger > svg {
+    @apply justify-self-end;
+  }
+
+  .filter-title,
   .filter-group-trigger > span {
     @apply truncate;
   }
@@ -276,13 +295,13 @@
 
   .asset-list {
     display: grid;
-    grid-template-rows: 38px minmax(0, 1fr);
+    grid-template-rows: 42px minmax(0, 1fr);
   }
 
   .asset-list-head,
   .asset-row {
     display: grid;
-    grid-template-columns: 56px 86px minmax(220px, 1fr) 118px minmax(170px, 0.9fr) 82px 204px;
+    grid-template-columns: 52px minmax(190px, 1fr) minmax(260px, 0.9fr) 244px 142px;
     align-items: center;
     gap: 0;
   }
@@ -291,12 +310,26 @@
     @apply border-b border-border bg-muted/60 text-[11px] font-semibold text-muted-foreground;
   }
 
-  .asset-list-head span {
+  .asset-list-head > span {
     @apply px-2;
   }
 
-  .asset-list-head span:first-child {
+  .asset-select-head {
     @apply grid h-full place-items-center p-0;
+  }
+
+  .asset-name-head,
+  .asset-tag-head,
+  .asset-actions-head {
+    @apply text-left;
+  }
+
+  .asset-middle-head {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: 72px 118px minmax(210px, 1fr) 82px;
+    @apply h-full items-center overflow-x-auto;
+    scrollbar-width: thin;
   }
 
   .asset-rows {
@@ -305,7 +338,7 @@
 
   .asset-row {
     width: 100%;
-    min-height: 68px;
+    min-height: 84px;
     border-bottom: 1px solid var(--border);
     @apply bg-card text-left text-foreground outline-none transition-colors;
   }
@@ -326,11 +359,15 @@
 
   .kind-dot,
   .status-pill {
-    @apply h-6 max-w-24 justify-start truncate rounded-md border px-2 text-[10px] font-semibold;
+    @apply h-7 justify-center truncate rounded-md border px-2 text-[10px] font-semibold;
+  }
+
+  .kind-dot {
+    @apply w-8 px-0;
   }
 
   .kind-dot svg {
-    @apply size-3;
+    @apply size-4;
   }
 
   .kind-dot.is-image {
@@ -373,6 +410,14 @@
     @apply text-xs font-medium text-muted-foreground;
   }
 
+  .asset-middle {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: 72px 118px minmax(210px, 1fr) 82px;
+    @apply items-center overflow-x-auto py-2;
+    scrollbar-width: thin;
+  }
+
   .status-pill {
     @apply max-w-20 bg-background text-muted-foreground;
   }
@@ -406,16 +451,50 @@
   }
 
   .row-actions {
-    @apply inline-flex min-w-0 justify-end gap-1 overflow-x-auto pr-2;
-    scrollbar-width: none;
-  }
-
-  .row-actions::-webkit-scrollbar {
-    display: none;
+    display: grid;
+    grid-template-columns: repeat(2, 32px);
+    grid-auto-rows: 32px;
+    @apply min-w-0 justify-end gap-1 pr-2;
   }
 
   .row-actions .icon-button {
     @apply size-7 min-h-7 min-w-7;
+  }
+
+  .row-tags {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: 28px;
+    @apply min-w-0 gap-1 pr-2;
+  }
+
+  .tag-pill,
+  .tag-add-pill {
+    @apply flex min-w-0 items-center rounded-full border border-border bg-background px-2 text-[11px] font-medium text-muted-foreground;
+  }
+
+  .tag-pill {
+    @apply truncate;
+  }
+
+  .tag-pill.is-removable {
+    @apply cursor-pointer text-foreground hover:border-foreground/30 hover:bg-accent;
+  }
+
+  .tag-pill.is-overflow {
+    @apply justify-center bg-muted text-foreground;
+  }
+
+  .tag-add-pill {
+    @apply gap-1 border-dashed;
+  }
+
+  .tag-add-pill svg {
+    @apply size-3 shrink-0;
+  }
+
+  .tag-add-pill input {
+    @apply h-full min-w-0 flex-1 bg-transparent text-[11px] outline-none placeholder:text-muted-foreground;
   }
 
   .favorite-action.is-active svg {
@@ -642,14 +721,7 @@
 
     .asset-list-head,
     .asset-row {
-      grid-template-columns: 52px 76px minmax(140px, 1fr) 112px 204px;
-    }
-
-    .asset-list-head span:nth-child(5),
-    .asset-list-head span:nth-child(6),
-    .asset-path,
-    .status-pill {
-      display: none !important;
+      grid-template-columns: 52px minmax(170px, 1fr) minmax(230px, 0.75fr) 224px 142px;
     }
   }
 
@@ -696,12 +768,7 @@
 
     .asset-list-head,
     .asset-row {
-      grid-template-columns: 52px 76px minmax(120px, 1fr) 78px 204px;
-    }
-
-    .asset-list-head span:nth-child(4),
-    .asset-path {
-      display: none !important;
+      grid-template-columns: 52px minmax(160px, 1fr) minmax(220px, 0.75fr) 212px 138px;
     }
 
     .preview-head h2 {
@@ -784,16 +851,22 @@
 
     .asset-list-head,
     .asset-row {
-      grid-template-columns: 48px minmax(110px, 1fr) 66px 110px;
+      grid-template-columns: 44px minmax(120px, 1fr) minmax(170px, 0.55fr) 152px 68px;
     }
 
-    .asset-list-head span:nth-child(2),
-    .asset-list-head span:nth-child(5),
-    .asset-list-head span:nth-child(6),
-    .kind-dot,
-    .asset-path,
-    .status-pill {
-      display: none !important;
+    .asset-middle,
+    .asset-middle-head {
+      grid-template-columns: 48px 112px minmax(180px, 1fr) 72px;
+    }
+
+    .asset-tag-head,
+    .asset-actions-head {
+      @apply px-1;
+    }
+
+    .row-tags {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      @apply pr-1;
     }
 
     .row-actions .icon-button {

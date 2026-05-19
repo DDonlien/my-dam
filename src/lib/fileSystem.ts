@@ -22,6 +22,7 @@ export async function pickDirectory(mode: 'read' | 'readwrite' = 'readwrite') {
     throw new Error('当前浏览器不支持直接选择文件夹。请使用 Chrome 或 Edge。')
   }
   const handle = await window.showDirectoryPicker({ mode })
+  if (mode === 'read') return handle
   const ok = await ensurePermission(handle, mode)
   if (!ok) throw new Error('没有获得该文件夹的访问权限。')
   return handle
