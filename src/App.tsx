@@ -1,16 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import {
-  Check,
+  ChevronDown,
+  ChevronUp,
+  ChevronsLeft,
+  ChevronsRight,
   Download,
   Eye,
   FolderOpen,
   Image as ImageIcon,
-  ListFilter,
   Lock,
   MousePointerClick,
   RefreshCw,
   Search,
   Star,
+  Tags,
   Trash2,
   Type,
   Unlock,
@@ -18,6 +22,22 @@ import {
 import './App.css'
 import { InlineAudioPlayer } from './components/InlineAudioPlayer'
 import { PreviewPane } from './components/PreviewPane'
+import { Badge } from './components/ui/badge'
+import { Button } from './components/ui/button'
+import { Checkbox } from './components/ui/checkbox'
+import { Input } from './components/ui/input'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from './components/ui/popover'
+import { ScrollArea } from './components/ui/scroll-area'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from './components/ui/tooltip'
 import {
   buildFileIndex,
   copyFileToDirectory,
@@ -29,6 +49,7 @@ import {
   renameFileAtPath,
   stableId,
   supportsFileSystemAccess,
+  writeJsonFile,
 } from './lib/fileSystem'
 import {
   hydrateIndexAssets,
@@ -44,6 +65,8 @@ import {
   recordRename,
   removeAssetsFromCollection,
   saveLocalState,
+  setAssetRating,
+  setAssetTags,
   STATE_FILENAME,
   touchState,
 } from './lib/state'
@@ -56,9 +79,11 @@ import type {
   ManifestSource,
 } from './types'
 import { createTemplateAssets } from './lib/templateAssets'
+import { cn } from './lib/utils'
 
 type FileIndex = Awaited<ReturnType<typeof buildFileIndex>>
 type KindFilter = AssetKind | 'all'
+type FilterGroup = 'type' | 'tag' | 'collection' | 'rating'
 
 const EMPTY_INDEX: FileIndex = {
   byPath: new Map<string, IndexedFile>(),
@@ -74,6 +99,11 @@ const KIND_FILTERS: KindFilter[] = [
   'document',
   'unknown',
 ]
+
+const ASSET_KIND_FILTERS = KIND_FILTERS.filter(
+  (kind): kind is AssetKind => kind !== 'all',
+)
+const RATING_FILTERS = [5, 4, 3, 2, 1]
 
 const INDEX_SOURCE_ID = '__asset-browser-index__'
 
@@ -93,15 +123,21 @@ function App() {
   const [activeAudioId, setActiveAudioId] = useState('')
   const [audioPlaySignal, setAudioPlaySignal] = useState(0)
   const [previewMode, setPreviewMode] = useState<'click' | 'hover'>('click')
-  const [previewLocked, setPreviewLocked] = useState(false)
-  const [filtersExpanded, setFiltersExpanded] = useState(false)
+  const [previewLocked, setPreviewLocked] = useState(true)
+  const [sourcePanelCollapsed, setSourcePanelCollapsed] = useState(false)
+  const [activityCollapsed, setActivityCollapsed] = useState(false)
+  const [expandedFilterGroups, setExpandedFilterGroups] = useState<FilterGroup[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
-  const [kindFilter, setKindFilter] = useState<KindFilter>('all')
-  const [favoriteFilter, setFavoriteFilter] = useState('all')
+  const [selectedKindFilters, setSelectedKindFilters] = useState<AssetKind[]>([])
+  const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([])
+  const [selectedCollectionFilters, setSelectedCollectionFilters] = useState<string[]>([])
+  const [selectedRatingFilters, setSelectedRatingFilters] = useState<number[]>([])
   const [stateDoc, setStateDoc] = useState<AppStateDoc>(() => loadLocalState())
+  const [metadataReady, setMetadataReady] = useState(false)
   const [busy, setBusy] = useState('')
   const [activity, setActivity] = useState<ActivityItem[]>([])
+  const lastMetadataSaveRef = useRef('')
 
   const activeManifest = manifests.find((item) => item.id === activeManifestId)
   const activeSourceName =
@@ -111,11 +147,21 @@ function App() {
   const templateAssets = useMemo(() => createTemplateAssets(), [])
   const sourceAssets = assets.length > 0 ? assets : templateAssets
   const previewAsset = sourceAssets.find((asset) => asset.id === previewAssetId)
-  const favoriteIds = useMemo(() => {
-    if (favoriteFilter === 'all') return null
-    const collection = stateDoc.favorites.find((item) => item.id === favoriteFilter)
-    return new Set(collection?.entries.map((entry) => entry.id) ?? [])
-  }, [favoriteFilter, stateDoc.favorites])
+  const tagOptions = useMemo(() => {
+    const tags = new Set<string>()
+    sourceAssets.forEach((asset) => {
+      asset.tags.forEach((tag) => tags.add(tag))
+      stateDoc.assetTags[asset.id]?.forEach((tag) => tags.add(tag))
+    })
+    return Array.from(tags).sort((a, b) => a.localeCompare(b))
+  }, [sourceAssets, stateDoc.assetTags])
+
+  const collectionAssetIds = useMemo(() => {
+    const selected = stateDoc.favorites.filter((collection) =>
+      selectedCollectionFilters.includes(collection.id),
+    )
+    return new Set(selected.flatMap((collection) => collection.entries.map((entry) => entry.id)))
+  }, [selectedCollectionFilters, stateDoc.favorites])
 
   const filteredAssets = useMemo(() => {
     const terms = query
@@ -124,8 +170,34 @@ function App() {
       .filter(Boolean)
 
     return sourceAssets.filter((asset) => {
-      if (kindFilter !== 'all' && asset.kind !== kindFilter) return false
-      if (favoriteIds && !favoriteIds.has(asset.id)) return false
+      if (
+        selectedKindFilters.length > 0 &&
+        !selectedKindFilters.includes(asset.kind)
+      ) {
+        return false
+      }
+      if (
+        selectedCollectionFilters.length > 0 &&
+        !collectionAssetIds.has(asset.id)
+      ) {
+        return false
+      }
+      const assetTags = [
+        ...asset.tags,
+        ...(stateDoc.assetTags[asset.id] ?? []),
+      ]
+      if (
+        selectedTagFilters.length > 0 &&
+        !selectedTagFilters.every((tag) => assetTags.includes(tag))
+      ) {
+        return false
+      }
+      if (
+        selectedRatingFilters.length > 0 &&
+        !selectedRatingFilters.includes(stateDoc.assetRatings[asset.id] ?? 0)
+      ) {
+        return false
+      }
       if (terms.length === 0) return true
       const haystack = [
         asset.name,
@@ -134,24 +206,85 @@ function App() {
         asset.folder,
         asset.typeLabel,
         asset.tags.join(' '),
+        stateDoc.assetTags[asset.id]?.join(' ') ?? '',
         ...Object.values(asset.metadata),
       ]
         .join(' ')
         .toLocaleLowerCase()
       return terms.every((term) => haystack.includes(term))
     })
-  }, [sourceAssets, favoriteIds, kindFilter, query])
+  }, [
+    sourceAssets,
+    selectedKindFilters,
+    selectedCollectionFilters,
+    collectionAssetIds,
+    selectedTagFilters,
+    selectedRatingFilters,
+    query,
+    stateDoc.assetRatings,
+    stateDoc.assetTags,
+  ])
 
   const previewableAsset =
     previewAsset && isPreviewPaneAsset(previewAsset) ? previewAsset : undefined
   const showPreviewPane = previewLocked || Boolean(previewableAsset)
-  const workspaceClassName = showPreviewPane
-    ? 'workspace has-preview'
-    : 'workspace is-list-only'
+  const workspaceClassName = cn(
+    'workspace',
+    showPreviewPane ? 'has-preview' : 'is-list-only',
+  )
+  const filteredAssetIds = useMemo(
+    () => filteredAssets.map((asset) => asset.id),
+    [filteredAssets],
+  )
+  const selectedFilteredCount = filteredAssetIds.filter((id) =>
+    selectedIds.has(id),
+  ).length
+  const allFilteredSelected =
+    filteredAssetIds.length > 0 &&
+    selectedFilteredCount === filteredAssetIds.length
 
   useEffect(() => {
     saveLocalState(stateDoc)
   }, [stateDoc])
+
+  useEffect(() => {
+    if (!rootHandle || !metadataReady) return
+
+    const nextMetadata = touchState({
+      ...stateDoc,
+      sourceRootName: rootName || stateDoc.sourceRootName,
+    })
+    const serialized = JSON.stringify(nextMetadata, null, 2)
+    if (serialized === lastMetadataSaveRef.current) return
+
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void writeJsonFile(rootHandle, STATE_FILENAME, nextMetadata)
+        .then(() => {
+          lastMetadataSaveRef.current = serialized
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return
+          setActivity((items) => [
+            {
+              id: stableId(`${Date.now()}:metadata-save-failed`),
+              level: 'fail' as const,
+              message:
+                error instanceof Error
+                  ? `保存 ${STATE_FILENAME} 失败：${error.message}`
+                  : `保存 ${STATE_FILENAME} 失败。`,
+              time: new Date().toLocaleTimeString(),
+            },
+            ...items,
+          ].slice(0, 80))
+        })
+    }, 250)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [metadataReady, rootHandle, rootName, stateDoc])
 
   const log = (level: ActivityItem['level'], message: string) => {
     setActivity((items) => [
@@ -177,6 +310,8 @@ function App() {
     try {
       setBusy('Indexing folder')
       const root = await pickDirectory('readwrite')
+      setMetadataReady(false)
+      lastMetadataSaveRef.current = ''
       const [nextManifests, nextIndex] = await Promise.all([
         findManifestFiles(root),
         buildFileIndex(root),
@@ -192,7 +327,9 @@ function App() {
 
       try {
         const saved = await readJsonFile<AppStateDoc>(root, STATE_FILENAME)
-        setStateDoc(normalizeState(saved))
+        const normalized = normalizeState(saved)
+        setStateDoc(normalized)
+        lastMetadataSaveRef.current = JSON.stringify(normalized, null, 2)
         log('success', `读取 ${STATE_FILENAME}`)
       } catch {
         setStateDoc((current) =>
@@ -201,6 +338,7 @@ function App() {
       }
 
       await loadIndexForRoot(root, nextManifests, nextIndex, root.name)
+      setMetadataReady(true)
     } catch (error) {
       handlePickerError(error, '选择目录失败。')
     } finally {
@@ -303,7 +441,7 @@ function App() {
     loadingIndex = false,
   ) => {
     if (status === 'empty') {
-      log('warn', '根目录没有找到 CSV/XLSX，也没有可读取的索引。')
+      log('warn', '根目录没有找到 asset-browser-index JSON/CSV/XLSX。')
       return
     }
     if (status === 'loaded') {
@@ -350,12 +488,16 @@ function App() {
     })
   }
 
-  const selectVisible = () => {
-    setSelectedIds(new Set(filteredAssets.map((asset) => asset.id)))
-  }
-
-  const clearSelection = () => {
-    setSelectedIds(new Set())
+  const toggleFilteredSelection = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (allFilteredSelected) {
+        filteredAssetIds.forEach((id) => next.delete(id))
+      } else {
+        filteredAssetIds.forEach((id) => next.add(id))
+      }
+      return next
+    })
   }
 
   const requestAudioPlayback = (assetId: string) => {
@@ -498,6 +640,39 @@ function App() {
     log('success', `收藏到 ${collection.name}：${asset.name}`)
   }
 
+  const updateAssetRating = (asset: AssetRecord, rating: number) => {
+    const current = stateDoc.assetRatings[asset.id] ?? 0
+    const nextRating = current === rating ? 0 : rating
+    setStateDoc((currentState) => setAssetRating(currentState, asset, nextRating))
+    log(
+      'success',
+      nextRating > 0
+        ? `评分：${asset.name} -> ${nextRating}`
+        : `清空评分：${asset.name}`,
+    )
+  }
+
+  const setFilterGroupOpen = (group: FilterGroup, open: boolean) => {
+    setExpandedFilterGroups((current) => {
+      if (open) return current.includes(group) ? current : [...current, group]
+      return current.filter((item) => item !== group)
+    })
+  }
+
+  const editAssetTags = (asset: AssetRecord) => {
+    const currentTags = stateDoc.assetTags[asset.id] ?? []
+    const nextValue = window.prompt('标签，用逗号或分号分隔', currentTags.join(', '))
+    if (nextValue === null) return
+    const nextTags = splitUserTags(nextValue)
+    setStateDoc((current) => setAssetTags(current, asset, nextTags))
+    log(
+      'success',
+      nextTags.length > 0
+        ? `更新标签：${asset.name} -> ${nextTags.join(', ')}`
+        : `清空标签：${asset.name}`,
+    )
+  }
+
   const loadMetadataManually = async () => {
     try {
       const directory = rootHandle ?? (await pickDirectory('read'))
@@ -510,79 +685,180 @@ function App() {
   }
 
   return (
-    <main className="shell">
-      <aside className="panel">
-        <div className="brand">
-          <div className="brand-mark" aria-hidden="true">
-            AB
-          </div>
-          <h1>ASSET BROWSER</h1>
-          <button
-            className={`icon-button ${previewMode === 'hover' ? 'is-active' : ''}`}
-            type="button"
-            title={previewMode === 'click' ? '点击预览' : 'Hover 预览'}
-            onClick={() =>
-              setPreviewMode((mode) => (mode === 'click' ? 'hover' : 'click'))
-            }
-          >
-            {previewMode === 'click' ? (
-              <MousePointerClick size={15} />
+    <TooltipProvider>
+    <motion.main
+      className={cn('shell', sourcePanelCollapsed && 'is-panel-collapsed')}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.16, ease: 'easeOut' }}
+    >
+      <nav className="nav-rail" aria-label="Primary">
+        <Button
+          className={cn(
+            'nav-item nav-logo',
+            sourcePanelCollapsed ? 'is-collapsed' : 'is-expanded'
+          )}
+          variant="ghost"
+          type="button"
+          title={sourcePanelCollapsed ? '展开 Asset Browser' : '收起 Asset Browser'}
+          aria-label={sourcePanelCollapsed ? '展开 Asset Browser' : '收起 Asset Browser'}
+          onClick={() => setSourcePanelCollapsed((value) => !value)}
+        >
+          <span className="nav-monogram">AB</span>
+          <span>Panel</span>
+          <span className="nav-toggle-mark" aria-hidden="true">
+            {sourcePanelCollapsed ? (
+              <ChevronsRight />
             ) : (
-              <Eye size={15} />
+              <ChevronsLeft />
             )}
-          </button>
-          <button
-            className={`icon-button ${previewLocked ? 'is-active' : ''}`}
-            type="button"
-            title={previewLocked ? '预览窗格已锁定' : '锁定预览窗格'}
-            onClick={() => setPreviewLocked((value) => !value)}
-          >
-            {previewLocked ? <Lock size={15} /> : <Unlock size={15} />}
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            title="重新读取"
-            onClick={reloadActiveManifest}
-            disabled={!rootHandle || Boolean(busy)}
-          >
-            <RefreshCw size={15} />
-          </button>
+          </span>
+        </Button>
+        <Button className="nav-item is-active" variant="ghost" type="button" title="Assets">
+          <ImageIcon />
+          <span>Assets</span>
+        </Button>
+      </nav>
+
+      <AnimatePresence initial={false}>
+      {!sourcePanelCollapsed && (
+      <motion.aside
+        className="panel"
+        initial={{ x: -16, opacity: 0 }}
+        animate={{ x: 0, opacity: 1 }}
+        exit={{ x: -16, opacity: 0 }}
+        transition={{ duration: 0.16, ease: 'easeOut' }}
+      >
+        <div className="brand">
+          <div>
+            <h1>Asset Browser</h1>
+            <p>Art + implementation library</p>
+          </div>
+          <div className="brand-actions">
+            <ToolbarIconButton
+              label="收起资源面板"
+              onClick={() => setSourcePanelCollapsed(true)}
+            >
+              <ChevronsLeft />
+            </ToolbarIconButton>
+            <ToolbarIconButton
+              label={previewMode === 'click' ? '点击预览' : 'Hover 预览'}
+              active={previewMode === 'hover'}
+              onClick={() =>
+                setPreviewMode((mode) => (mode === 'click' ? 'hover' : 'click'))
+              }
+            >
+              {previewMode === 'click' ? (
+                <MousePointerClick />
+              ) : (
+                <Eye />
+              )}
+            </ToolbarIconButton>
+            <ToolbarIconButton
+              label={previewLocked ? '预览窗格已锁定' : '锁定预览窗格'}
+              active={previewLocked}
+              onClick={() => setPreviewLocked((value) => !value)}
+            >
+              {previewLocked ? <Lock /> : <Unlock />}
+            </ToolbarIconButton>
+            <ToolbarIconButton
+              label="重新读取"
+              onClick={reloadActiveManifest}
+              disabled={!rootHandle || Boolean(busy)}
+            >
+              <RefreshCw />
+            </ToolbarIconButton>
+          </div>
         </div>
 
-        <div className="panel-body">
+        <ScrollArea className="panel-body">
           <section className="drop">
             <strong>{rootName || 'No folder selected'}</strong>
             <span>{activeSourceName || 'CSV / XLSX manifest'}</span>
             <div className="folder-actions">
-              <button
+              <Button
                 className="primary"
                 type="button"
                 onClick={chooseRoot}
                 disabled={!supportsFileSystemAccess() || Boolean(busy)}
               >
-                <FolderOpen size={15} />
+                <FolderOpen data-icon="inline-start" />
                 OPEN FOLDER
-              </button>
+              </Button>
               {rootHandle && assets.length === 0 && (
-                <button type="button" onClick={loadMetadataManually}>
+                <Button type="button" variant="outline" onClick={loadMetadataManually}>
                   META
-                </button>
+                </Button>
               )}
             </div>
             {!supportsFileSystemAccess() && (
               <span className="warn-text">Chrome / Edge required</span>
             )}
           </section>
-        </div>
-      </aside>
+
+          <section className="section">
+            <div className="section-head">
+              <h2>Production</h2>
+              {busy && <Badge className="busy-chip" variant="secondary">{busy}</Badge>}
+            </div>
+            <div className="stats-grid">
+              <div>
+                <span>Assets</span>
+                <strong>{sourceAssets.length}</strong>
+              </div>
+              <div>
+                <span>Visible</span>
+                <strong>{filteredAssets.length}</strong>
+              </div>
+              <div>
+                <span>Selected</span>
+                <strong>{selectedIds.size}</strong>
+              </div>
+              <div>
+                <span>Missing</span>
+                <strong>{sourceAssets.filter((a) => a.status === 'missing').length}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="section">
+            <div className="section-head">
+              <h2>Collections</h2>
+            </div>
+            <div className="favorite-list">
+              {stateDoc.favorites.map((collection) => (
+                <Button
+                  key={collection.id}
+                  className={cn(
+                    'collection-row',
+                    selectedCollectionFilters.includes(collection.id) && 'is-active',
+                  )}
+                  variant="ghost"
+                  type="button"
+                  onClick={() =>
+                    setSelectedCollectionFilters((current) =>
+                      toggleArrayValue(current, collection.id),
+                    )
+                  }
+                >
+                  <Star />
+                  <span>{collection.name}</span>
+                  <strong>{collection.entries.length}</strong>
+                </Button>
+              ))}
+            </div>
+          </section>
+        </ScrollArea>
+      </motion.aside>
+      )}
+      </AnimatePresence>
 
       <section className="viewport">
         <header className="topbar">
           <div className="topbar-filters">
             <div className="topbar-search">
-              <Search size={14} />
-              <input
+              <Search />
+              <Input
                 value={query}
                 placeholder="Search name / type / path"
                 aria-label="Search assets"
@@ -590,78 +866,144 @@ function App() {
               />
             </div>
             <div className="topbar-filter-row">
-              <button
-                className={`filter-row-label ${filtersExpanded ? 'is-active' : ''}`}
-                type="button"
-                onClick={() => setFiltersExpanded((value) => !value)}
+              <FilterGroupControl
+                title="Type"
+                count={selectedKindFilters.length}
+                expanded={expandedFilterGroups.includes('type')}
+                onOpenChange={(open) => setFilterGroupOpen('type', open)}
               >
-                <ListFilter size={13} />
-                Filters
-              </button>
-              <div className="filter-chip-row">
-                {KIND_FILTERS.map((kind) => (
-                  <button
+                {ASSET_KIND_FILTERS.map((kind) => (
+                  <FilterOptionButton
                     key={kind}
-                    type="button"
-                    className={kindFilter === kind ? 'is-active' : ''}
-                    onClick={() => setKindFilter(kind)}
+                    active={selectedKindFilters.includes(kind)}
+                    onClick={() =>
+                      setSelectedKindFilters((current) =>
+                        toggleArrayValue(current, kind),
+                      )
+                    }
                   >
-                    {kind === 'all' ? 'All' : getKindLabel(kind)}
-                  </button>
+                    {getKindLabel(kind)}
+                  </FilterOptionButton>
                 ))}
-              </div>
-              <select
-                className="topbar-favorites"
-                value={favoriteFilter}
-                aria-label="Favorite collection filter"
-                onChange={(event) => setFavoriteFilter(event.target.value)}
+              </FilterGroupControl>
+
+              <FilterGroupControl
+                title="Tag"
+                count={selectedTagFilters.length}
+                expanded={expandedFilterGroups.includes('tag')}
+                onOpenChange={(open) => setFilterGroupOpen('tag', open)}
               >
-                <option value="all">All assets</option>
+                {tagOptions.length > 0 ? (
+                  tagOptions.map((tag) => (
+                    <FilterOptionButton
+                      key={tag}
+                      active={selectedTagFilters.includes(tag)}
+                      onClick={() =>
+                        setSelectedTagFilters((current) =>
+                          toggleArrayValue(current, tag),
+                        )
+                      }
+                    >
+                      {tag}
+                    </FilterOptionButton>
+                  ))
+                ) : (
+                  <span className="filter-empty">No tags</span>
+                )}
+              </FilterGroupControl>
+
+              <FilterGroupControl
+                title="Collection"
+                count={selectedCollectionFilters.length}
+                expanded={expandedFilterGroups.includes('collection')}
+                onOpenChange={(open) => setFilterGroupOpen('collection', open)}
+              >
                 {stateDoc.favorites.map((collection) => (
-                  <option key={collection.id} value={collection.id}>
+                  <FilterOptionButton
+                    key={collection.id}
+                    active={selectedCollectionFilters.includes(collection.id)}
+                    onClick={() =>
+                      setSelectedCollectionFilters((current) =>
+                        toggleArrayValue(current, collection.id),
+                      )
+                    }
+                  >
                     {collection.name} ({collection.entries.length})
-                  </option>
+                  </FilterOptionButton>
                 ))}
-              </select>
+              </FilterGroupControl>
+
+              <FilterGroupControl
+                title="Rating"
+                count={selectedRatingFilters.length}
+                expanded={expandedFilterGroups.includes('rating')}
+                onOpenChange={(open) => setFilterGroupOpen('rating', open)}
+              >
+                {RATING_FILTERS.map((rating) => (
+                  <FilterOptionButton
+                    key={rating}
+                    active={selectedRatingFilters.includes(rating)}
+                    onClick={() =>
+                      setSelectedRatingFilters((current) =>
+                        toggleArrayValue(current, rating),
+                      )
+                    }
+                  >
+                    {rating} 分
+                  </FilterOptionButton>
+                ))}
+              </FilterGroupControl>
             </div>
-            {filtersExpanded && (
-              <div className="filter-metrics">
-                <Stat label="Assets" value={sourceAssets.length} />
-                <Stat label="Visible" value={filteredAssets.length} />
-                <Stat label="Selected" value={selectedIds.size} />
-                <Stat
-                  label="Missing"
-                  value={sourceAssets.filter((a) => a.status === 'missing').length}
-                />
-                <button type="button" onClick={selectVisible} disabled={filteredAssets.length === 0}>
-                  Select visible
-                </button>
-                <button type="button" onClick={clearSelection} disabled={selectedIds.size === 0}>
-                  Clear
-                </button>
-              </div>
-            )}
           </div>
         </header>
 
         <div className={workspaceClassName}>
           <section className="asset-list" aria-label="Assets">
             <div className="asset-list-head">
-              <span></span>
+              <span>
+                <Checkbox
+                  className="select-checkbox"
+                  checked={
+                    allFilteredSelected
+                      ? true
+                      : selectedFilteredCount > 0
+                        ? 'indeterminate'
+                        : false
+                  }
+                  disabled={filteredAssetIds.length === 0}
+                  aria-label="Select all visible assets"
+                  onCheckedChange={toggleFilteredSelection}
+                />
+              </span>
               <span>Type</span>
               <span>Name</span>
+              <span>Rating</span>
               <span>Path</span>
               <span>Status</span>
               <span>Actions</span>
             </div>
-            <div className="asset-rows">
+            <ScrollArea className="asset-rows">
+              <AnimatePresence initial={false}>
               {filteredAssets.map((asset) => (
-                <div
+                (() => {
+                  const displayTags = [
+                    ...asset.tags,
+                    ...(stateDoc.assetTags[asset.id] ?? []),
+                  ]
+                  return (
+                <motion.div
                   key={asset.id}
+                  layout
                   role="button"
                   tabIndex={0}
-                  className={`asset-row ${asset.id === focusedId ? 'is-focused' : ''}`}
-                  onClick={() => activateAsset(asset)}
+                  className={cn('asset-row', asset.id === focusedId && 'is-focused')}
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.12, ease: 'easeOut' }}
+                  onClick={() => {
+                    activateAsset(asset)
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault()
@@ -685,129 +1027,254 @@ function App() {
                     if (!previewLocked) setPreviewAssetId('')
                   }}
                 >
-                  <span
+                  <Checkbox
                     className="row-check"
+                    checked={selectedIds.has(asset.id)}
                     onClick={(event) => {
                       event.stopPropagation()
-                      toggleSelected(asset.id)
                     }}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        toggleSelected(asset.id)
-                      }
+                      event.stopPropagation()
                     }}
-                    role="checkbox"
-                    aria-checked={selectedIds.has(asset.id)}
-                    tabIndex={0}
-                  >
-                    {selectedIds.has(asset.id) && <Check size={13} />}
-                  </span>
-                  <span className={`kind-dot is-${asset.kind}`}>
-                    {asset.kind === 'image' ? <ImageIcon size={13} /> : getKindLabel(asset.kind)}
-                  </span>
+                    onCheckedChange={() => {
+                      toggleSelected(asset.id)
+                    }}
+                    aria-label={`Select ${asset.name}`}
+                  />
+                  <Badge className={cn('kind-dot', `is-${asset.kind}`)} variant="secondary">
+                    {asset.kind === 'image' ? <ImageIcon data-icon="inline-start" /> : null}
+                    {getKindLabel(asset.kind)}
+                  </Badge>
                   <span className="asset-name">
                     <strong>{asset.name}</strong>
                     {asset.kind === 'audio' ? (
-                      <InlineAudioPlayer
+                    <InlineAudioPlayer
                         asset={asset}
                         active={activeAudioId === asset.id}
                         playSignal={activeAudioId === asset.id ? audioPlaySignal : 0}
                         previewMode={previewMode}
                         onActivate={() => requestAudioPlayback(asset.id)}
                         onInteract={() => setPreviewAssetId('')}
-                      />
-                    ) : (
-                      asset.tags.length > 0 && <em>{asset.tags.join(' / ')}</em>
+                    />
+                  ) : (
+                      displayTags.length > 0 && <em>{displayTags.join(' / ')}</em>
                     )}
                   </span>
+                  <RatingControl
+                    rating={stateDoc.assetRatings[asset.id] ?? 0}
+                    onRate={(rating) => updateAssetRating(asset, rating)}
+                  />
                   <span className="asset-path">{asset.normalizedPath || asset.reference}</span>
-                  <span className={`status-pill is-${asset.status}`}>
+                  <Badge className={cn('status-pill', `is-${asset.status}`)} variant="outline">
                     {asset.status}
-                  </span>
+                  </Badge>
                   <span className="row-actions" onClick={(event) => event.stopPropagation()}>
-                    <button
-                      type="button"
-                      className="icon-button"
-                      title="重命名"
+                    <ToolbarIconButton
+                      label="重命名"
                       onClick={() => renameAsset(asset)}
                       disabled={!asset.fileHandle}
                     >
-                      <Type size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button"
-                      title="下载"
+                      <Type />
+                    </ToolbarIconButton>
+                    <ToolbarIconButton
+                      label="下载"
                       onClick={() => downloadAsset(asset)}
                     >
-                      <Download size={13} />
-                    </button>
+                      <Download />
+                    </ToolbarIconButton>
                     {stateDoc.favorites.map((collection) => (
-                      <button
+                      <ToolbarIconButton
                         key={collection.id}
-                        type="button"
-                        className={`icon-button favorite-action ${
-                          isAssetInCollection(asset.id, collection.id) ? 'is-active' : ''
-                        }`}
-                        title={`收藏到${collection.name}`}
+                        label={`收藏到${collection.name}`}
+                        active={isAssetInCollection(asset.id, collection.id)}
+                        className="favorite-action"
                         onClick={() => toggleFavoriteCollection(asset, collection.id)}
                       >
-                        <Star size={13} />
-                      </button>
+                        <Star />
+                      </ToolbarIconButton>
                     ))}
-                    <button
-                      type="button"
-                      className="icon-button danger"
-                      title="删除"
+                    <ToolbarIconButton
+                      label="编辑标签"
+                      active={Boolean(stateDoc.assetTags[asset.id]?.length)}
+                      onClick={() => editAssetTags(asset)}
+                    >
+                      <Tags />
+                    </ToolbarIconButton>
+                    <ToolbarIconButton
+                      label="删除"
+                      danger
                       onClick={() => deleteAsset(asset)}
                       disabled={!asset.fileHandle}
                     >
-                      <Trash2 size={13} />
-                    </button>
+                      <Trash2 />
+                    </ToolbarIconButton>
                   </span>
-                </div>
+                </motion.div>
+                  )
+                })()
               ))}
+              </AnimatePresence>
               {filteredAssets.length === 0 && (
                 <div className="empty-list">No assets</div>
               )}
-            </div>
+            </ScrollArea>
           </section>
 
-          {showPreviewPane && (
-            <PreviewPane
-              asset={previewableAsset}
-              history={stateDoc.history}
-              fileIndex={fileIndex.byPath}
-            />
-          )}
+          <AnimatePresence initial={false}>
+            {showPreviewPane && (
+              <PreviewPane
+                asset={previewableAsset}
+                history={stateDoc.history}
+                fileIndex={fileIndex.byPath}
+              />
+            )}
+          </AnimatePresence>
         </div>
 
-        <div className="log-dock">
+        <motion.div
+          className={cn('log-dock', activityCollapsed && 'is-collapsed')}
+          layout
+          transition={{ duration: 0.16, ease: 'easeOut' }}
+        >
           <div className="log-head">
             <span>Activity</span>
+            <ToolbarIconButton
+              label={activityCollapsed ? '展开 Activity' : '收起 Activity'}
+              aria-label={activityCollapsed ? '展开 Activity' : '收起 Activity'}
+              onClick={() => setActivityCollapsed((value) => !value)}
+            >
+              {activityCollapsed ? <ChevronUp /> : <ChevronDown />}
+            </ToolbarIconButton>
           </div>
-          <div className="log-content">
-            {activity.map((item) => (
-              <div className={`log-line ${item.level}`} key={item.id}>
-                [{item.time}] {item.message}
-              </div>
-            ))}
-            {activity.length === 0 && <div className="log-line info">Ready.</div>}
-          </div>
-        </div>
+          <AnimatePresence initial={false}>
+          {!activityCollapsed && (
+            <motion.div
+              className="log-content"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.16, ease: 'easeOut' }}
+            >
+              <ScrollArea className="log-scroll">
+              {activity.map((item) => (
+                <div className={cn('log-line', item.level)} key={item.id}>
+                  [{item.time}] {item.message}
+                </div>
+              ))}
+              {activity.length === 0 && <div className="log-line info">Ready.</div>}
+              </ScrollArea>
+            </motion.div>
+          )}
+          </AnimatePresence>
+        </motion.div>
       </section>
-    </main>
+    </motion.main>
+    </TooltipProvider>
   )
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function FilterGroupControl({
+  title,
+  count,
+  expanded,
+  onOpenChange,
+  children,
+}: {
+  title: string
+  count: number
+  expanded: boolean
+  onOpenChange: (open: boolean) => void
+  children: ReactNode
+}) {
   return (
-    <div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
+    <Popover open={expanded} onOpenChange={onOpenChange}>
+      <section className={cn('filter-group', expanded && 'is-expanded')}>
+        <PopoverTrigger asChild>
+          <Button className="filter-group-trigger" variant="outline" type="button">
+            <span>{title}</span>
+            {count > 0 && <Badge variant="secondary">{count}</Badge>}
+            {expanded ? <ChevronUp /> : <ChevronDown />}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="filter-options" align="start">
+          {children}
+        </PopoverContent>
+      </section>
+    </Popover>
+  )
+}
+
+function FilterOptionButton({
+  active,
+  className,
+  ...props
+}: ComponentProps<typeof Button> & { active?: boolean }) {
+  return (
+    <Button
+      className={cn('filter-option', active && 'is-active', className)}
+      variant={active ? 'secondary' : 'ghost'}
+      size="sm"
+      type="button"
+      {...props}
+    />
+  )
+}
+
+function RatingControl({
+  rating,
+  onRate,
+}: {
+  rating: number
+  onRate: (rating: number) => void
+}) {
+  return (
+    <span className="rating-control" onClick={(event) => event.stopPropagation()}>
+      {[1, 2, 3, 4, 5].map((value) => (
+        <Button
+          key={value}
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className={rating >= value ? 'is-active' : ''}
+          title={`${value} 分`}
+          onClick={() => onRate(value)}
+        >
+          <Star />
+        </Button>
+      ))}
+    </span>
+  )
+}
+
+function ToolbarIconButton({
+  label,
+  active = false,
+  danger = false,
+  className,
+  children,
+  ...props
+}: ComponentProps<typeof Button> & {
+  label: string
+  active?: boolean
+  danger?: boolean
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          className={cn('icon-button', active && 'is-active', danger && 'danger', className)}
+          variant={danger ? 'destructive' : active ? 'secondary' : 'ghost'}
+          size="icon-sm"
+          type="button"
+          title={label}
+          aria-label={label}
+          {...props}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -824,6 +1291,19 @@ function isUserAbort(error: unknown) {
     error instanceof DOMException &&
     (error.name === 'AbortError' || error.message.includes('aborted'))
   )
+}
+
+function splitUserTags(value: string) {
+  return value
+    .split(/[;,，、|]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+}
+
+function toggleArrayValue<T>(items: T[], value: T) {
+  return items.includes(value)
+    ? items.filter((item) => item !== value)
+    : [...items, value]
 }
 
 export default App

@@ -7,7 +7,7 @@ import type {
 } from '../types'
 import { stableId } from './fileSystem'
 
-export const STATE_FILENAME = 'asset-browser.state.json'
+export const STATE_FILENAME = 'asset-browser-metadata.json'
 const LOCAL_STORAGE_KEY = 'asset-browser.state.v1'
 
 export function createEmptyState(): AppStateDoc {
@@ -20,6 +20,8 @@ export function createEmptyState(): AppStateDoc {
     ],
     history: [],
     renames: [],
+    assetTags: {},
+    assetRatings: {},
   }
 }
 
@@ -51,6 +53,8 @@ export function normalizeState(value: unknown): AppStateDoc {
       : createEmptyState().favorites,
     history: Array.isArray(incoming.history) ? incoming.history.slice(0, 120) : [],
     renames: Array.isArray(incoming.renames) ? incoming.renames : [],
+    assetTags: normalizeAssetTags(incoming.assetTags),
+    assetRatings: normalizeAssetRatings(incoming.assetRatings),
   }
 }
 
@@ -145,6 +149,29 @@ export function recordRename(
   })
 }
 
+export function setAssetTags(
+  state: AppStateDoc,
+  asset: AssetRecord,
+  tags: string[],
+) {
+  const nextTags = tags.map((tag) => tag.trim()).filter(Boolean)
+  const assetTags = { ...state.assetTags }
+  if (nextTags.length === 0) delete assetTags[asset.id]
+  else assetTags[asset.id] = Array.from(new Set(nextTags))
+  return touchState({ ...state, assetTags })
+}
+
+export function setAssetRating(
+  state: AppStateDoc,
+  asset: AssetRecord,
+  rating: number,
+) {
+  const assetRatings = { ...state.assetRatings }
+  if (rating < 1 || rating > 5) delete assetRatings[asset.id]
+  else assetRatings[asset.id] = rating
+  return touchState({ ...state, assetRatings })
+}
+
 function normalizeCollection(collection: FavoriteCollection): FavoriteCollection {
   return {
     id: collection.id || stableId(`collection:${collection.name}`),
@@ -162,4 +189,27 @@ function toFavoriteEntry(asset: AssetRecord): FavoriteEntry {
     normalizedPath: asset.normalizedPath,
     addedAt: new Date().toISOString(),
   }
+}
+
+function normalizeAssetTags(value: unknown) {
+  if (!value || typeof value !== 'object') return {}
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([assetId, tags]) => [
+        assetId,
+        Array.isArray(tags)
+          ? Array.from(new Set(tags.map((tag) => String(tag).trim()).filter(Boolean)))
+          : [],
+      ])
+      .filter(([, tags]) => tags.length > 0),
+  )
+}
+
+function normalizeAssetRatings(value: unknown) {
+  if (!value || typeof value !== 'object') return {}
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([assetId, rating]) => [assetId, Number(rating)] as const)
+      .filter(([, rating]) => Number.isInteger(rating) && rating >= 1 && rating <= 5),
+  ) as Record<string, number>
 }

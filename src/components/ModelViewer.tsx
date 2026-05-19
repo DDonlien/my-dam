@@ -7,6 +7,15 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { Box, Pause, Play, RotateCcw } from 'lucide-react'
 import type { AssetRecord, IndexedFile } from '../types'
 import { dirname, getExtension, joinPath, normalizeLookupPath } from '../lib/fileSystem'
+import { Button } from './ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select'
 
 interface ModelViewerProps {
   asset: AssetRecord
@@ -67,7 +76,7 @@ export function ModelViewer({ asset, fileIndex }: ModelViewerProps) {
 
     const cleanupUrls: string[] = []
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0xfbfbf8)
+    scene.background = new THREE.Color(0xf7f8fa)
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000)
     camera.position.set(3.5, 2.5, 4.5)
@@ -244,35 +253,45 @@ export function ModelViewer({ asset, fileIndex }: ModelViewerProps) {
       <div ref={hostRef} className="model-canvas" />
       <div className="model-controls">
         <span className="model-status">
-          <Box size={14} />
+          <Box />
           {message}
         </span>
         {clips.length > 0 && (
-          <select
+          <Select
             value={activeClip}
-            onChange={(event) => setActiveClip(event.target.value)}
-            aria-label="Animation clip"
+            onValueChange={setActiveClip}
           >
-            {clips.map((clip) => (
-              <option key={clip} value={clip}>
-                {clip}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="model-select" size="sm" aria-label="Animation clip">
+              <SelectValue placeholder="Animation clip" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {clips.map((clip) => (
+                  <SelectItem key={clip} value={clip}>
+                    {clip}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         )}
         {clips.length > 0 && (
-          <button
+          <Button
             className="icon-button"
             type="button"
+            variant="ghost"
+            size="icon-sm"
             title={playing ? '暂停动画' : '播放动画'}
             onClick={() => setPlaying((value) => !value)}
           >
-            {playing ? <Pause size={15} /> : <Play size={15} />}
-          </button>
+            {playing ? <Pause /> : <Play />}
+          </Button>
         )}
-        <button
+        <Button
           className="icon-button"
           type="button"
+          variant="ghost"
+          size="icon-sm"
           title="重置 3D 视窗"
           onClick={() => {
             const camera = cameraRef.current
@@ -288,8 +307,8 @@ export function ModelViewer({ asset, fileIndex }: ModelViewerProps) {
             setMessage('View reset')
           }}
         >
-          <RotateCcw size={15} />
-        </button>
+          <RotateCcw />
+        </Button>
       </div>
     </div>
   )

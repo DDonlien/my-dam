@@ -7,6 +7,7 @@ import type {
   SerializableAssetRecord,
 } from '../types'
 import {
+  INDEX_BASENAME,
   readJsonFileWithMeta,
   resolveIndexedFile,
   stableId,
@@ -14,7 +15,7 @@ import {
 } from './fileSystem'
 import { parseManifest } from './manifest'
 
-export const INDEX_FILENAME = 'asset-browser.index.json'
+export const INDEX_FILENAME = `${INDEX_BASENAME}.json`
 
 type FileIndex = {
   byPath: Map<string, IndexedFile>
@@ -34,12 +35,23 @@ export async function syncIndexDocument(
   manifests: ManifestSource[],
   fileIndex: FileIndex,
 ): Promise<IndexSyncResult> {
-  const currentSources = createManifestSnapshots(manifests)
+  const latestManifest = getLatestManifest(manifests)
+  const currentSources = createManifestSnapshots(
+    latestManifest ? [latestManifest] : [],
+  )
 
   let existing: { data: AssetIndexDoc; file: File } | undefined
+  let invalidReason = ''
   try {
-    existing = await readJsonFileWithMeta<AssetIndexDoc>(root, INDEX_FILENAME)
-  } catch {
+    const candidate = await readJsonFileWithMeta<unknown>(root, INDEX_FILENAME)
+    if (isAssetIndexDoc(candidate.data)) {
+      existing = { ...candidate, data: candidate.data }
+    } else {
+      invalidReason = 'index json is invalid'
+    }
+  } catch (error) {
+    invalidReason =
+      error instanceof SyntaxError ? 'index json parse failed' : 'index missing'
     existing = undefined
   }
 
@@ -53,22 +65,35 @@ export async function syncIndexDocument(
     }
   }
 
-  if (manifests.length === 0 && !existing) {
+  if (!latestManifest && !existing && invalidReason === 'index missing') {
     return {
       doc: createIndexDoc(rootName, currentSources, []),
       status: 'empty',
-      reason: 'no manifests or index',
+      reason: invalidReason || 'no manifests or index',
     }
   }
 
-  const assets = await parseAllManifests(manifests, fileIndex)
+  if (!latestManifest) {
+    throw new Error(`${INDEX_FILENAME} 不合法，并且没有找到 ${INDEX_BASENAME}.csv 或 ${INDEX_BASENAME}.xlsx。`)
+  }
+
+  const assets = await parseAllManifests([latestManifest], fileIndex)
   const nextDoc = createIndexDoc(rootName, currentSources, assets)
-  await writeJsonFile(root, INDEX_FILENAME, nextDoc)
+  try {
+    await writeJsonFile(root, INDEX_FILENAME, nextDoc)
+  } catch (error) {
+    throw new Error(
+      `生成 ${INDEX_FILENAME} 失败：${
+        error instanceof Error ? error.message : '未知错误'
+      }`,
+      { cause: error },
+    )
+  }
 
   return {
     doc: nextDoc,
     status: existing ? 'updated' : 'created',
-    reason: staleReason ?? 'index created',
+    reason: staleReason || invalidReason || 'index created',
   }
 }
 
@@ -157,14 +182,14 @@ function getStaleReason(
   currentSources: ManifestSnapshot[],
 ) {
   if (!doc || !indexFile) return 'index missing'
-  if (doc.schemaVersion !== 1) return 'index schema changed'
-  if (!sameManifestSnapshot(doc.manifestSources, currentSources)) {
-    return 'manifest set changed'
-  }
+  if (currentSources.length === 0) return ''
   const newerSource = currentSources.find(
     (source) => source.lastModified > indexFile.lastModified,
   )
   if (newerSource) return `${newerSource.name} is newer than index`
+  if (!sameManifestSnapshot(doc.manifestSources, currentSources)) {
+    return 'manifest source changed'
+  }
   return ''
 }
 
@@ -182,4 +207,42 @@ function sameManifestSnapshot(
       item.lastModified === other.lastModified
     )
   })
+}
+
+function getLatestManifest(manifests: ManifestSource[]) {
+  return manifests
+    .slice()
+    .sort((a, b) => b.lastModified - a.lastModified || a.name.localeCompare(b.name))[0]
+}
+
+function isAssetIndexDoc(value: unknown): value is AssetIndexDoc {
+  if (!value || typeof value !== 'object') return false
+  const doc = value as Partial<AssetIndexDoc>
+  if (doc.schemaVersion !== 1) return false
+  if (typeof doc.generatedAt !== 'string') return false
+  if (typeof doc.sourceRootName !== 'string') return false
+  if (!Array.isArray(doc.manifestSources)) return false
+  if (!Array.isArray(doc.assets)) return false
+  return doc.assets.every(isSerializableAssetRecord)
+}
+
+function isSerializableAssetRecord(value: unknown): value is SerializableAssetRecord {
+  if (!value || typeof value !== 'object') return false
+  const asset = value as Partial<SerializableAssetRecord>
+  return (
+    typeof asset.id === 'string' &&
+    typeof asset.name === 'string' &&
+    typeof asset.kind === 'string' &&
+    typeof asset.typeLabel === 'string' &&
+    typeof asset.reference === 'string' &&
+    typeof asset.normalizedPath === 'string' &&
+    typeof asset.folder === 'string' &&
+    typeof asset.extension === 'string' &&
+    typeof asset.status === 'string' &&
+    typeof asset.sourceRow === 'number' &&
+    Array.isArray(asset.tags) &&
+    Boolean(asset.metadata) &&
+    typeof asset.metadata === 'object' &&
+    typeof asset.isExternal === 'boolean'
+  )
 }

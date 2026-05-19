@@ -106,6 +106,8 @@ export interface AppStateDoc {
   favorites: FavoriteCollection[]
   history: HistoryEntry[]
   renames: RenameEntry[]
+  assetTags: Record<string, string[]>
+  assetRatings: Record<string, number>
 }
 
 export interface ActivityItem {

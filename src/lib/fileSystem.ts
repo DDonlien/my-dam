@@ -1,5 +1,6 @@
 import type { IndexedFile, ManifestSource } from '../types'
 
+export const INDEX_BASENAME = 'asset-browser-index'
 const MANIFEST_EXTENSIONS = new Set(['csv', 'xlsx'])
 
 export const supportsFileSystemAccess = () =>
@@ -32,6 +33,8 @@ export async function findManifestFiles(root: FileSystemDirectoryHandle) {
     if (handle.kind !== 'file') continue
     const extension = getExtension(handle.name)
     if (!MANIFEST_EXTENSIONS.has(extension)) continue
+    const basename = handle.name.slice(0, -(extension.length + 1))
+    if (basename !== INDEX_BASENAME) continue
     const fileHandle = handle as FileSystemFileHandle
     const file = await fileHandle.getFile()
     manifests.push({
