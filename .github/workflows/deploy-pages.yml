@@ -33,11 +33,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Build
-        run: npm run build
+        run: npm run build:web
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: dist
+          path: ts/dist
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4

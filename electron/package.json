@@ -1,0 +1,58 @@
+{
+  "name": "asset-browser-desktop",
+  "version": "1.0.0",
+  "description": "Desktop shell for Asset Browser.",
+  "main": "main.js",
+  "author": "DDonlien",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir --config.npmRebuild=false",
+    "dist": "electron-builder --config.npmRebuild=false"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "7zip-bin": "^5.2.0",
+    "electron": "31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.taobe.assetbrowser",
+    "productName": "AssetBrowser",
+    "electronVersion": "31.7.7",
+    "publish": {
+      "provider": "github",
+      "owner": "DDonlien",
+      "repo": "asset-browser"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../ts/dist",
+        "to": "ts/dist"
+      }
+    ],
+    "mac": {
+      "target": {
+        "target": "dmg",
+        "arch": [
+          "arm64"
+        ]
+      }
+    },
+    "win": {
+      "target": {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    }
+  }
+}

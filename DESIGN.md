@@ -115,6 +115,13 @@ Linear's custom typeface isn't publicly distributed; the documented fallback `SF
 
 The dark canvas IS the whitespace. Sections separate by lift onto surface-1 panels, not by gaps in white. Within a panel, generous `{spacing.lg}` 24px gaps between content blocks; `{spacing.section}` 96px between sections.
 
+### Electron Window Chrome
+
+- Electron 桌面端使用沉浸式标题栏，不显示系统默认黑色 header。
+- macOS 窗口保留原生红黄绿 traffic lights，并在内容顶部预留 34px 安全区，背景沿用应用浅灰 shell 背景。
+- 顶部安全区仅作为窗口拖拽区域，不放置说明文字、工具按钮或营销式标题。
+- Web 版本不应用该安全区；仅当根元素存在 `is-electron` class 时启用。
+
 ## Elevation & Depth
 
 | Level              | Treatment                                                          | Use                                      |
@@ -311,4 +318,3 @@ Linear's depth is carried by surface ladder + hairline borders. The brand resist
 - Light mode is not documented because the marketing site does not ship a light theme.
 - Linear's actual product UI uses a richer color-tag palette (red, orange, yellow, green, blue, purple) for issue priorities and project labels — those colors live in the in-product surfaces shown in mockups.
 - The custom display, text, and mono families are proprietary; an open-source substitute is acceptable.
-
