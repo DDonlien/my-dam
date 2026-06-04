@@ -25,6 +25,7 @@ function createWindow() {
     width: 1280,
     height: 800,
     backgroundColor: '#f5f5f7',
+    icon: path.join(__dirname, 'build', 'icon.png'),
     titleBarStyle: useHiddenInsetTitlebar ? 'hiddenInset' : 'hidden',
     ...(useHiddenInsetTitlebar
       ? { trafficLightPosition: { x: 14, y: 14 } }

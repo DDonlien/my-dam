@@ -26,12 +26,14 @@
       "repo": "asset-browser"
     },
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "main.js",
       "preload.js"
     ],
+    "icon": "build/icon.png",
     "extraResources": [
       {
         "from": "../ts/dist",
