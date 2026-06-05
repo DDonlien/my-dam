@@ -47,7 +47,7 @@ function createWindow() {
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:48673/asset-browser/')
+    mainWindow.loadURL('http://localhost:48673/my-dam/')
     mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadURL('app://./index.html')
@@ -66,8 +66,8 @@ app.whenReady().then(() => {
     let pathname = decodeURIComponent(requestUrl.pathname)
     
     // Strip Vite sub-directory base path prefix if present
-    if (pathname.startsWith('/asset-browser/')) {
-      pathname = pathname.slice('/asset-browser/'.length)
+    if (pathname.startsWith('/my-dam/')) {
+      pathname = pathname.slice('/my-dam/'.length)
     }
     if (pathname === '' || pathname === '/') {
       pathname = 'index.html'

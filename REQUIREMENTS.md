@@ -1,6 +1,6 @@
 # 需求与验收追踪
 
-本文件记录资产浏览器（Asset Browser）的全部需求和任务状态。
+本文件记录 MyDAM（My Digital Asset Manager）的全部需求和任务状态。
 
 ## Phase 1：核心 Web 资产浏览器（已完成）
 

@@ -49,7 +49,7 @@ jobs:
       - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: asset-browser-${{ matrix.os }}
+          name: my-dam-${{ matrix.os }}
           path: |
             electron/dist/*.dmg
             electron/dist/*.exe

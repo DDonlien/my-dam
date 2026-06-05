@@ -1,5 +1,5 @@
 {
-  "name": "asset-browser-root",
+  "name": "my-dam-root",
   "private": true,
   "workspaces": [
     "ts",
@@ -10,7 +10,7 @@
     "build": "npm run build:web && npm run desktop:pack",
     "build:web": "npm run build -w ts",
     "lint": "npm run lint -w ts",
-    "desktop:dev": "concurrently \"npm run dev -w ts\" \"wait-on http://localhost:48673/asset-browser/ && cross-env NODE_ENV=development npm run start -w electron\"",
+    "desktop:dev": "concurrently \"npm run dev -w ts\" \"wait-on http://localhost:48673/my-dam/ && cross-env NODE_ENV=development npm run start -w electron\"",
     "desktop:pack": "npm run pack -w electron",
     "desktop:dist": "npm run build:web && npm run dist -w electron"
   },

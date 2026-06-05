@@ -197,7 +197,7 @@ function createTriangleGltfDataUrl(animated: boolean) {
   }
 
   const gltf = {
-    asset: { version: '2.0', generator: 'Asset Browser Template' },
+    asset: { version: '2.0', generator: 'MyDAM Template' },
     scenes: [{ nodes: [0] }],
     scene: 0,
     nodes: [{ mesh: 0, name: animated ? 'Animated Triangle' : 'Static Triangle' }],

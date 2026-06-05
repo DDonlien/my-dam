@@ -1,7 +1,7 @@
 {
-  "name": "asset-browser-desktop",
+  "name": "my-dam-desktop",
   "version": "1.0.0",
-  "description": "Desktop shell for Asset Browser.",
+  "description": "Desktop shell for MyDAM.",
   "main": "main.js",
   "author": "DDonlien",
   "private": true,
@@ -17,13 +17,13 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.taobe.assetbrowser",
-    "productName": "AssetBrowser",
+    "appId": "com.taobe.mydam",
+    "productName": "MyDAM",
     "electronVersion": "31.7.7",
     "publish": {
       "provider": "github",
       "owner": "DDonlien",
-      "repo": "asset-browser"
+      "repo": "my-dam"
     },
     "directories": {
       "output": "dist",

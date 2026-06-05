@@ -128,7 +128,7 @@
 
 ### 项目概况
 
-- 项目名称：Asset Browser (资产浏览器)
+- 项目名称：MyDAM（My Digital Asset Manager，正式产品名；代码内部 npm package 名为 `my-dam`）
 - 产品简介：通过 `asset-browser-index` JSON、CSV 或 Excel 索引来读取、预览和管理本地资产（图片、音频、视频、3D模型、文档）的浏览器。利用浏览器的 File System Access API 实现本地文件夹读取。
 - 主要用户：个人开发者、3D 美术创作者、音效设计师等，用于本地资产的整理与预览。
 - 当前阶段：已完成单页应用的核心工作台开发（P1 需求），正在准备进行 Electron 打包与工程规范化（P2 需求）。
@@ -169,7 +169,7 @@
   - `asset-browser-index.csv`
   - `asset-browser-index.xlsx`
   *注意：只有以上确切命名的文件才被视为资产浏览器索引。不要将任意 CSV 或 Excel 文件误判为索引文件。*
-- **混合情况**：如果同时存在两类特征，若包含 `ts/package.json` 且其中声明了 Asset Browser 应用本身，则优先作为代码仓库处理；否则作为资产仓库处理，避免破坏应用的源码假设。
+- **混合情况**：如果同时存在两类特征，若包含 `ts/package.json` 且其中声明了 MyDAM 应用本身（package name 为 `my-dam`），则优先作为代码仓库处理；否则作为资产仓库处理，避免破坏应用的源码假设。
 
 #### 2. 代码仓库开发规范
 遵循现有的 React/Vite 实现，并保持改动范围聚焦：

@@ -1,10 +1,10 @@
-# Asset Browser (资产浏览器)
+# MyDAM
 
 本项目是一个用于本地文件夹资产浏览和管理的 React 单页应用，并提供 Electron 桌面封装。当本地文件夹的根目录包含 `asset-browser-index` JSON、CSV 或 Excel 索引时，本应用利用浏览器的 File System Access API 或 Electron preload 注入的本地文件系统桥接能力来读取文件夹、解析并预览其中的媒体资源，并写回包含元数据和交互状态的 JSON 文件。
 
 ## 项目概述
 
-- 项目名称：Asset Browser (资产浏览器)
+- 项目名称：MyDAM（My Digital Asset Manager）
 - 一句话简介：基于索引的本地多媒体资产浏览器与管理器。
 - 解决的问题：在不上传云端的情况下，极速预览、打标签、分集管理本地存储的海量多媒体资产（图片、音视频、3D模型、文档）。
 - 目标用户：独立游戏开发者、美术设计师、音效创作者以及需要整理大量本地素材的创作者。
@@ -64,7 +64,7 @@ npm run desktop:dist
 npm run lint
 ```
 
-打开浏览器访问 `http://127.0.0.1:5173/`。由于 File System Access API 限制，建议使用 Chrome 或 Edge 浏览器。
+打开浏览器访问 `http://127.0.0.1:5173/`（实际默认端口 48673，访问 `http://localhost:48673/my-dam/`）。由于 File System Access API 限制，建议使用 Chrome 或 Edge 浏览器。
 
 ## 目录结构
 

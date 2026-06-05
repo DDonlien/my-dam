@@ -136,7 +136,7 @@ const ASSET_KIND_FILTERS = KIND_FILTERS.filter(
 )
 const RATING_FILTERS = [5, 4, 3, 2, 1]
 
-const INDEX_SOURCE_ID = '__asset-browser-index__'
+const INDEX_SOURCE_ID = '__my-dam-index__'
 const ASSET_ROW_HEIGHT = 56
 const ASSET_VIRTUAL_OVERSCAN = 8
 const KIND_ICON_COMPONENTS: Record<AssetKind, typeof ImageIcon> = {
@@ -1203,8 +1203,8 @@ function App() {
           )}
           variant="ghost"
           type="button"
-          title={sourcePanelCollapsed ? '展开 Asset Browser' : '收起 Asset Browser'}
-          aria-label={sourcePanelCollapsed ? '展开 Asset Browser' : '收起 Asset Browser'}
+          title={sourcePanelCollapsed ? '展开 MyDAM' : '收起 MyDAM'}
+          aria-label={sourcePanelCollapsed ? '展开 MyDAM' : '收起 MyDAM'}
           onClick={() => setSourcePanelCollapsed((value) => !value)}
         >
           {sourcePanelCollapsed ? <ChevronsRight /> : <ChevronsLeft />}
